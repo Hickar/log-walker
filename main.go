@@ -5,7 +5,6 @@ import (
 	"flag"
 	"fmt"
 	"io"
-	"io/fs"
 	"log"
 	"os"
 	"path"
@@ -34,7 +33,11 @@ func main() {
 		log.Fatal("no \"needle\" argument was provided")
 	}
 
-	inputFile, _ := os.Open(*inputPath)
+	inputFile, err := os.Open(*inputPath)
+	if err != nil {
+		log.Fatalf("unable to open input directory/file: %s", err)
+	}
+
 	fileStat, _ := inputFile.Stat()
 
 	results := make(chan string)
@@ -43,15 +46,14 @@ func main() {
 	go WriteMatchesToFile(results, done, *outputPath)
 
 	if fileStat.IsDir() {
-		fileSys := os.DirFS(*inputPath)
-		logDir, err := fs.ReadDir(fileSys, ".")
+		dirFiles, err := inputFile.ReadDir(-1)
 		if err != nil {
 			log.Fatalf("unexpected error during directory read: %s", err)
 		}
 
-		for _, entry := range logDir {
+		for _, file := range dirFiles {
 			wg.Add(1)
-			go SearchInFile(path.Join(*inputPath, entry.Name()), *needle, results)
+			go SearchInFile(path.Join(*inputPath, file.Name()), *needle, results)
 		}
 
 	} else {
@@ -63,6 +65,7 @@ func main() {
 	close(results)
 
 	<-done
+	close(done)
 }
 
 func SearchInFile(filepath string, needle string, results chan string) {
@@ -92,11 +95,11 @@ func SearchInFile(filepath string, needle string, results chan string) {
 
 func WriteMatchesToFile(results chan string, done chan bool, filepath string) {
 	file, err := os.OpenFile(filepath, os.O_CREATE|os.O_WRONLY, 0777)
-	defer file.Close()
-
 	if err != nil {
 		log.Fatalf("error during output file creation: %s", err)
 	}
+	defer file.Close()
+
 
 	for line := range results {
 		_, err := file.WriteString(line)
